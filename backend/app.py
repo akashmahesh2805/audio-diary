@@ -1,8 +1,8 @@
 # app.py
 from fastapi import FastAPI, File, UploadFile
 from pydantic import BaseModel
-import librosa
-import torch
+import librosa # type: ignore
+import torch # type: ignore
 from model import analyze_audio  # Import the model function for analysis
 
 app = FastAPI()
