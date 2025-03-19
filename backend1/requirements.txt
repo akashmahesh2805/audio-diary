@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+librosa
+transformers
+torch
+torchaudio
+nltk
+pydantic
