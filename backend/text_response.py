@@ -1,25 +1,29 @@
-from transformers import pipeline
+"""
+text_response.py - Generates AI response using Mistral 7B
 
-# Load a free, open-source LLM (Mistral 7B)
-generator = pipeline("text-generation", model="mistralai/Mistral-7B-v0.1")
+- Uses both detected emotion and text content to generate responses.
+- Fine-tunes the prompt for better conversational quality.
+"""
 
-def generate_response(emotion_results):
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+
+# Load Mistral 7B model and tokenizer
+model_name = "mistralai/Mistral-7B-Instruct"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
+
+def generate_response(text, emotion):
     """
-    Generate a supportive response based on the detected emotion.
-    
-    Args:
-        emotion_results (dict): Emotion analysis results with keys 'emotion' and 'confidence'.
-    
-    Returns:
-        str: AI-generated response.
+    Generates an AI response based on emotion + text.
+    - Forms a structured prompt.
+    - Uses Mistral 7B to generate a response.
     """
-    prompt = f"The user feels {emotion_results['emotion']}. Generate a supportive and empathetic response."
-
-    response = generator(prompt, max_length=50, num_return_sequences=1)
+    prompt = f"User feels '{emotion}' about '{text}'. Provide an appropriate response."
     
-    return response[0]["generated_text"]
-
-# Example usage
-if __name__ == "__main__":
-    test_emotion = {"emotion": "sad", "confidence": 0.95}
-    print(generate_response(test_emotion))
+    inputs = tokenizer(prompt, return_tensors="pt", padding=True)
+    
+    with torch.no_grad():
+        output = model.generate(**inputs, max_length=100)  # Generate response
+    
+    return tokenizer.decode(output[0], skip_special_tokens=True)  # Return clean text
