@@ -1,13 +1,25 @@
-import openai
+from transformers import pipeline
 
-openai.api_key = "YOUR_OPENAI_API_KEY"
+# Load a free, open-source LLM (Mistral 7B)
+generator = pipeline("text-generation", model="mistralai/Mistral-7B-v0.1")
 
 def generate_response(emotion_results):
-    prompt = f"The user feels {emotion_results['emotion']}. Generate a supportive response."
+    """
+    Generate a supportive response based on the detected emotion.
     
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "system", "content": prompt}]
-    )
+    Args:
+        emotion_results (dict): Emotion analysis results with keys 'emotion' and 'confidence'.
     
-    return response["choices"][0]["message"]["content"]
+    Returns:
+        str: AI-generated response.
+    """
+    prompt = f"The user feels {emotion_results['emotion']}. Generate a supportive and empathetic response."
+
+    response = generator(prompt, max_length=50, num_return_sequences=1)
+    
+    return response[0]["generated_text"]
+
+# Example usage
+if __name__ == "__main__":
+    test_emotion = {"emotion": "sad", "confidence": 0.95}
+    print(generate_response(test_emotion))
