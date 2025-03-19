@@ -16,6 +16,8 @@ def init_db():
     conn.commit()
     conn.close()
 
+    
+
 def store_entry(text, emotion, response):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
