@@ -13,3 +13,8 @@ An AI based voice dary that detects emotions in real time.
  ┃ ┣ 📜 wav2vec_model.pth  <br />
  ┣ 📜 requirements.txt  <br />
  ┣ 📜 README.md  <br />
+
+
+
+
+ Frontend: https://audio-diary-p1e4.vercel.app/
