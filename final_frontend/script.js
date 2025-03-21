@@ -37,7 +37,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Connect WebSocket
     function connectWebSocket() {
-        websocket = new WebSocket("ws://localhost:8000/audio-stream/");
+        websocket = new WebSocket("https://fastapi-production-6871.up.railway.app/");
 
         websocket.onopen = () => console.log("WebSocket connected");
         websocket.onmessage = (event) => handleWebSocketMessage(event);
