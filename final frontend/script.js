@@ -1,88 +1,158 @@
-// Sidebar Toggle
-const sidebar = document.getElementById("sidebar");
-const burgerMenu = document.getElementById("burger-menu");
-const closeBtn = document.getElementById("close-btn");
+// Elements
+const micButton = document.getElementById("micButton");
+const chatContainer = document.getElementById("chatContainer");
+const micCircle = document.getElementById("micCircle");
 
-burgerMenu.addEventListener("click", () => {
-    sidebar.classList.add("active");
-});
+let mediaRecorder;
+let audioContext;
+let analyser;
+let dataArray;
+let ws;
+let isRecording = false;
+let silenceTimeout;
 
-closeBtn.addEventListener("click", () => {
-    sidebar.classList.remove("active");
-});
+// Function to start recording
+async function startRecording() {
+    if (isRecording) return;
+    isRecording = true;
 
-// Handle Sidebar Links
-const sidebarLinks = document.querySelectorAll(".sidebar-menu a");
-sidebarLinks.forEach(link => {
-    link.addEventListener("click", (e) => {
-        e.preventDefault();
-        alert(`Navigating to: ${link.textContent}`);
-        sidebar.classList.remove("active");
-    });
-});
+    // Clear any previous WebSocket connection
+    if (ws) {
+        ws.close();
+    }
 
-// Profile Icon Click
-const profileIcon = document.getElementById("profile-icon");
-profileIcon.addEventListener("click", () => {
-    alert("Profile Page");
-});
+    ws = new WebSocket("ws://localhost:8000/audio-stream/");
+    ws.binaryType = "arraybuffer";
 
-// Speech Recognition
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-const recognition = new SpeechRecognition();
-recognition.continuous = false;
-recognition.interimResults = false;
-recognition.lang = "en-US";
+    ws.onopen = () => {
+        console.log("WebSocket connected.");
+    };
 
-const chatWindow = document.getElementById("chat-window");
-const micButton = document.getElementById("mic-button");
+    ws.onmessage = async (event) => {
+        let response = JSON.parse(event.data);
+        if (response.type === "text") {
+            addChatMessage("bot", response.text);
+        } else if (response.type === "audio") {
+            playAudio(response.audio_url);
+        }
+    };
 
-// Add Messages to Chat
-function addMessage(text, sender) {
-    const messageDiv = document.createElement("div");
-    messageDiv.classList.add("message", sender);
-    messageDiv.innerText = text;
-    chatWindow.appendChild(messageDiv);
-    chatWindow.scrollTop = chatWindow.scrollHeight; // Auto-scroll to latest message
-}
+    ws.onerror = (error) => {
+        console.error("WebSocket Error:", error);
+    };
 
-// AI Response (Simulated Emotion Detection)
-function getBotResponse(userText) {
-    const lowerText = userText.toLowerCase();
-    
-    if (lowerText.includes("happy") || lowerText.includes("won") || lowerText.includes("excited")) {
-        return "Wow, congrats! 🎉 That’s amazing!";
-    } else if (lowerText.includes("sad") || lowerText.includes("upset") || lowerText.includes("lonely")) {
-        return "I'm here for you. Want to talk about it? 💙";
-    } else if (lowerText.includes("angry") || lowerText.includes("frustrated")) {
-        return "Take a deep breath! Want some calming music? 🌿";
-    } else {
-        return "That's interesting! Tell me more. 🤔";
+    ws.onclose = () => {
+        console.log("WebSocket closed.");
+        stopMicAnimation();
+    };
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioContext.createMediaStreamSource(stream);
+        
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        const bufferLength = analyser.frequencyBinCount;
+        dataArray = new Uint8Array(bufferLength);
+        source.connect(analyser);
+
+        mediaRecorder = new MediaRecorder(stream);
+        let chunks = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                ws.send(event.data);
+                chunks.push(event.data);
+            }
+        };
+
+        mediaRecorder.onstop = () => {
+            ws.send(JSON.stringify({ type: "end" }));
+            stream.getTracks().forEach(track => track.stop());
+            stopMicAnimation();
+        };
+
+        mediaRecorder.start(250);
+        startMicAnimation();
+
+        detectSilence(stream);
+    } catch (error) {
+        console.error("Error accessing microphone:", error);
+        isRecording = false;
     }
 }
 
-// Start Listening on Button Click
+// Function to detect silence
+function detectSilence(stream) {
+    const threshold = 0.02;
+    function checkSilence() {
+        analyser.getByteFrequencyData(dataArray);
+        let avgVolume = dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
+
+        if (avgVolume < threshold * 255) {
+            clearTimeout(silenceTimeout);
+            silenceTimeout = setTimeout(stopRecording, 2000);
+        } else {
+            clearTimeout(silenceTimeout);
+        }
+
+        if (isRecording) {
+            requestAnimationFrame(checkSilence);
+        }
+    }
+    checkSilence();
+}
+
+// Function to stop recording
+function stopRecording() {
+    if (!isRecording) return;
+    isRecording = false;
+
+    mediaRecorder.stop();
+    if (ws) ws.close();
+}
+
+// Function to start mic animation
+function startMicAnimation() {
+    micCircle.classList.add("listening");
+    function animate() {
+        if (!isRecording) return;
+        analyser.getByteFrequencyData(dataArray);
+        let volume = dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
+        let scale = Math.max(1, 1 + volume / 100);
+        micCircle.style.transform = `scale(${scale})`;
+        requestAnimationFrame(animate);
+    }
+    animate();
+}
+
+// Function to stop mic animation
+function stopMicAnimation() {
+    micCircle.classList.remove("listening");
+    micCircle.style.transform = "scale(1)";
+}
+
+// Function to play audio
+function playAudio(url) {
+    let audio = new Audio(url);
+    audio.play();
+}
+
+// Function to add messages to chat
+function addChatMessage(sender, message) {
+    let msgDiv = document.createElement("div");
+    msgDiv.classList.add(sender === "user" ? "user-message" : "bot-message");
+    msgDiv.textContent = message;
+    chatContainer.appendChild(msgDiv);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
+// Event listener for mic button
 micButton.addEventListener("click", () => {
-    recognition.start();
-    micButton.style.transform = "scale(1.1)";
-    setTimeout(() => {
-        micButton.style.transform = "scale(1)";
-    }, 200);
+    if (isRecording) {
+        stopRecording();
+    } else {
+        startRecording();
+    }
 });
-
-// Handle Speech Recognition Result
-recognition.onresult = (event) => {
-    const userText = event.results[0][0].transcript;
-    addMessage(userText, "user");
-
-    // Get Bot Response
-    const botResponse = getBotResponse(userText);
-    setTimeout(() => {
-        addMessage(botResponse, "bot");
-    }, 1000);
-};
-
-// Handle Errors
-recognition.onerror = (event) => {
-    console.error("Speech recognition error:", event.error);
-};
