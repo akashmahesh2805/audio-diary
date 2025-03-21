@@ -1,76 +1,100 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
 import speech_to_text
 import emotion_analysis
 import text_response
 import text_to_speech
 import database
 import asyncio
+import logging
+import base64
+from fastapi.middleware.cors import CORSMiddleware
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Create a FastAPI instance
 app = FastAPI()
-from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins (change to specific domains for security)
+    allow_origins=["*"],  # Change this to your frontend URL in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# List to store active WebSocket connections (for multi-client support)
-active_connections = []
-
-
+# WebSocket endpoint for real-time audio streaming
 @app.websocket("/audio-stream/")
 async def audio_stream(websocket: WebSocket):
-    await websocket.accept()  # Accept the client connection
-    active_connections.append(websocket)  # Add connection to the active list
     
+    await websocket.accept()
+    logger.info("WebSocket connection established")
+
     try:
         while True:
-            # Receive audio data in chunks from the client
+            # Receive audio data from client
             audio_chunk = await websocket.receive_bytes()
+            logger.info(f"Received audio chunk: {len(audio_chunk)} bytes")
 
-            # Convert audio to text using the speech-to-text module
+            if not audio_chunk:
+                logger.warning("Received an empty audio chunk, skipping processing.")
+                continue
+
+            # Convert audio to text using speech-to-text
             text = await asyncio.to_thread(speech_to_text.process_chunk, audio_chunk)
+            logger.info(f"Transcription: {text}")
 
-            # Analyze emotional tone from audio using emotion analysis module
+            if not text.strip():
+                await websocket.send_json({"error": "No speech detected."})
+                logger.warning("No speech detected, skipping processing.")
+                continue
+
+            # Analyze emotional tone
             emotion = await asyncio.to_thread(emotion_analysis.analyze_audio_chunk, audio_chunk)
+            logger.info(f"Emotion detected: {emotion}")
 
-            # Generate an AI-based response using the extracted text and emotion
+            # Generate AI response
             response = await asyncio.to_thread(text_response.generate_response, text, emotion)
+            logger.info(f"Generated response: {response}")
 
-            # Convert the generated response to speech using text-to-speech
-            speech_output = await asyncio.to_thread(text_to_speech.convert_text_to_speech, response)
+            # Convert response to speech (returns bytes)
+            speech_bytes = await asyncio.to_thread(text_to_speech.convert_text_to_speech, response)
 
-            # Store session details in the database (text, emotion, response)
+            if not speech_bytes:
+                logger.error("Failed to generate speech output.")
+                await websocket.send_json({"error": "Failed to generate audio response."})
+                continue
+
+            # Store session details in the database
             await asyncio.to_thread(database.store_entry, text, emotion, response)
 
-            # Send the response (text + audio) back to the client over WebSocket
+            # Send JSON response first
             await websocket.send_json({
                 "transcription": text,
                 "emotion": emotion,
-                "response": response,
-                "audio_response": speech_output
+                "response": response
             })
 
+            # Send binary audio response separately
+            audio_base64 = base64.b64encode(speech_bytes).decode("utf-8")
+            await websocket.send_json({"audio_response": audio_base64})
+
+            logger.info("Audio response sent to client")
+
     except WebSocketDisconnect:
-        # Handle client disconnection
-        print("Client disconnected")
-        active_connections.remove(websocket)
+        logger.info("Client disconnected")
+    except Exception as e:
+        logger.error(f"Error in WebSocket connection: {e}")
+    finally:
+        await websocket.close()
+        logger.info("WebSocket closed.")
 
-
-# Endpoint to retrieve all stored diary entries from the database
+# Endpoint to retrieve all stored diary entries
 @app.get("/diary-entries/")
 async def get_entries():
-    # Fetch all entries from the database using the `get_entries` function
-    entries = await asyncio.to_thread(database.get_entries)
-    return {"entries": entries}
-
-
-# Run the FastAPI server using uvicorn
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    try:
+        entries = await asyncio.to_thread(database.get_entries)
+        return {"entries": entries}
+    except Exception as e:
+        logger.error(f"Error fetching diary entries: {e}")
+        return {"error": "Failed to fetch diary entries."}

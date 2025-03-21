@@ -1,51 +1,62 @@
-import requests
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+import logging
 
-# Mistral 7B model running on Ollama
-OLLAMA_URL = "http://localhost:11434/api/generate"
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Emotion-based prompts to enhance response quality
+# ✅ Use Mistral instead of GPT-2
+MODEL_NAME = "mistralai/Mistral-7B-v0.1"
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
+model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, trust_remote_code=True, torch_dtype=torch.float16, device_map="auto")
+
+# Emotion-based response styles
 EMOTION_PROMPTS = {
-    "happy": "Be cheerful and encouraging.",
-    "sad": "Be supportive and empathetic.",
-    "angry": "Be calm and help the user find solutions.",
-    "fearful": "Be reassuring and provide comfort.",
-    "neutral": "Be neutral and conversational.",
+    "happy": "Respond with joy and encouragement.",
+    "sad": "Be empathetic and comforting.",
+    "angry": "Remain calm and offer practical solutions.",
+    "fearful": "Provide reassurance and safety.",
+    "neutral": "Maintain a neutral and conversational tone.",
     "excited": "Match the excitement and enthusiasm.",
-    "frustrated": "Be understanding and offer guidance.",
+    "frustrated": "Be understanding and offer solutions.",
     "lonely": "Be warm and comforting.",
 }
 
-
 def generate_response(text, emotion):
     """
-    Generates a response based on the user's text and detected emotion using Mistral 7B.
-
-    :param text: Transcribed text from speech
-    :param emotion: Detected emotion (one of: happy, sad, angry, fearful, neutral, excited, frustrated, lonely)
-    :return: AI-generated response string
+    Generates an AI response based on the user's text and detected emotion.
     """
+    emotion_prompt = EMOTION_PROMPTS.get(emotion, "Maintain a neutral tone.")
 
-    # Default to neutral if emotion is not recognized
-    emotion_prompt = EMOTION_PROMPTS.get(emotion, "Be neutral and conversational.")
-
-    # Construct the LLM prompt
+    # ✅ Better, natural prompt structure
     prompt = f"""
-    User is speaking with an AI diary. They just shared something personal.
-    Their detected emotion is: {emotion}.
-    
-    Their message: "{text}"
-    
-    Your response should align with their emotion and situation. {emotion_prompt}
-    Keep it concise and natural.
+    User: {text}
+    Emotion: {emotion}
+    AI ({emotion_prompt}): 
     """
 
-    # Send request to Ollama
-    response = requests.post(
-        OLLAMA_URL,
-        json={"model": "mistral", "prompt": prompt, "stream": False}
-    )
+    try:
+        inputs = tokenizer(prompt, return_tensors="pt").to("cuda" if torch.cuda.is_available() else "cpu")
 
-    if response.status_code == 200:
-        return response.json()["response"].strip()
-    else:
+        output_ids = model.generate(
+            **inputs,
+            max_new_tokens=100,  # Limits response length
+            temperature=0.7,      # Balances creativity and coherence
+            top_p=0.9,            # Nucleus sampling for diversity
+            pad_token_id=tokenizer.eos_token_id
+        )
+
+        # ✅ Decode and clean the response
+        generated_text = tokenizer.decode(output_ids[0], skip_special_tokens=True).strip()
+
+        # ✅ Remove any repeated prompt from the output dynamically
+        if "AI (" in generated_text:
+            generated_text = generated_text.split("AI (", 1)[-1].split("):", 1)[-1].strip()
+
+        logger.info(f"Generated response: {generated_text}")
+        return generated_text
+
+    except Exception as e:
+        logger.error(f"Error generating response: {e}")
         return "I'm here for you. Feel free to share more."

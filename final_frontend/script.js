@@ -7,7 +7,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const mainContent = document.getElementById("main-content");
     const profileIcon = document.getElementById("profile-icon");
     const profileDropdown = document.getElementById("profile-dropdown");
-    <link rel="icon" href="data:;base64,iVBORw0KGgo="></link>
+
     let mediaRecorder;
     let audioChunks = [];
     let websocket;
@@ -38,39 +38,32 @@ document.addEventListener("DOMContentLoaded", () => {
     // Connect WebSocket
     function connectWebSocket() {
         websocket = new WebSocket("ws://localhost:8000/audio-stream/");
-    
-        websocket.onopen = () => {
-            console.log("WebSocket connection established");
-        };
-    
-        websocket.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            displayMessage(data.response, "bot"); // Display bot's response
-    
-            // Play the bot's audio response
-            const audio = new Audio(`data:audio/wav;base64,${data.audio_response}`);
-            audio.play();
-        };
-    
-        websocket.onclose = () => {
-            console.log("WebSocket connection closed");
-        };
+
+        websocket.onopen = () => console.log("WebSocket connected");
+        websocket.onmessage = (event) => handleWebSocketMessage(event);
+        websocket.onclose = () => console.log("WebSocket closed, reconnecting...");
     }
 
     function handleWebSocketMessage(event) {
         try {
             const data = JSON.parse(event.data);
             displayMessage(data.response, "bot");
-
-            // Play bot's audio response
+    
+            // Play bot's audio response if available
             if (data.audio_response) {
-                const audio = new Audio(`data:audio/wav;base64,${data.audio_response}`);
-                audio.play();
+                playBase64Audio(data.audio_response);
             }
         } catch (error) {
             console.error("Error processing WebSocket message:", error);
         }
     }
+    
+    // Function to decode Base64 and play audio
+    function playBase64Audio(base64Audio) {
+        const audio = new Audio(`data:audio/wav;base64,${base64Audio}`);
+        audio.play();
+    }
+    
 
     // Display messages in chat box
     function displayMessage(message, sender) {
@@ -88,56 +81,71 @@ document.addEventListener("DOMContentLoaded", () => {
             console.error("Speech Recognition API not supported.");
             return null;
         }
-
+    
         const recognitionInstance = new SpeechRecognition();
         recognitionInstance.continuous = false;
         recognitionInstance.interimResults = false;
         recognitionInstance.lang = "en-US";
-
+    
         recognitionInstance.onresult = (event) => {
             const transcript = event.results[0][0].transcript;
             displayMessage(transcript, "user");
+            sendAudioWithText(transcript);  // Send transcript along with the audio
         };
-
+    
         recognitionInstance.onerror = (event) => console.error("Speech recognition error:", event.error);
         return recognitionInstance;
     }
+    
 
-    // Start recording audio
-startBtn.addEventListener("click", async () => {
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm; codecs=opus" });
+    // Start Recording
+    startBtn.addEventListener("click", async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+            audioChunks = [];
 
-        mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0) {
-                audioChunks.push(event.data);
-            }
-        };
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) audioChunks.push(event.data);
+            };
 
-        mediaRecorder.onstop = async () => {
-            const audioBlob = new Blob(audioChunks, { type: "audio/webm; codecs=opus" });
-            const arrayBuffer = await audioBlob.arrayBuffer();
-            websocket.send(arrayBuffer); // Send audio file to the backend
-            audioChunks = []; // Reset audio chunks
-        };
+            mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+                const arrayBuffer = await audioBlob.arrayBuffer();
+                const base64Audio = await blobToBase64(audioBlob); // Convert to base64
+            
+                websocket.send(JSON.stringify({ 
+                    audio: base64Audio, 
+                    text: lastTranscript || ""  // Send last transcript if available
+                }));
+            
+                audioChunks = [];
+            };
+            
 
-        mediaRecorder.start(1000); // Send chunks every 1 second
-        startBtn.disabled = true;
-        stopBtn.disabled = false;
-    } catch (error) {
-        console.error("Error accessing microphone:", error);
-        displayMessage("Unable to access microphone. Please allow permissions.", "bot");
-    }
-});
-    // Stop recording audio
+            mediaRecorder.start();
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+
+            // Start Speech Recognition
+            recognition = initializeSpeechRecognition();
+            if (recognition) recognition.start();
+
+        } catch (error) {
+            console.error("Microphone access error:", error);
+            displayMessage("Please allow microphone access.", "bot");
+        }
+    });
+
+    // Stop Recording
     stopBtn.addEventListener("click", () => {
-    if (mediaRecorder && mediaRecorder.state === "recording") {
-        mediaRecorder.stop();
-        startBtn.disabled = false;
-        stopBtn.disabled = true;
-    }
-});
+        if (mediaRecorder && mediaRecorder.state === "recording") {
+            mediaRecorder.stop();
+            if (recognition) recognition.stop();  // Stop speech recognition
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+        }
+    });    
 
     // Initialize WebSocket
     connectWebSocket();
@@ -149,4 +157,12 @@ startBtn.addEventListener("click", async () => {
             alert(`${link.textContent} page will be implemented soon!`);
         });
     });
+    function blobToBase64(blob) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(blob);
+            reader.onloadend = () => resolve(reader.result.split(",")[1]); // Extract Base64 part
+        });
+    }
+    
 });
