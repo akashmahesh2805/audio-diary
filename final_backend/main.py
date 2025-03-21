@@ -9,12 +9,20 @@ import asyncio
 
 # Create a FastAPI instance
 app = FastAPI()
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins (change to specific domains for security)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # List to store active WebSocket connections (for multi-client support)
 active_connections = []
 
 
-# WebSocket endpoint for real-time audio streaming
 @app.websocket("/audio-stream/")
 async def audio_stream(websocket: WebSocket):
     await websocket.accept()  # Accept the client connection

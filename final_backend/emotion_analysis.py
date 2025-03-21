@@ -1,34 +1,25 @@
-import opensmile
 import numpy as np
+import io
+import torch
+import whisper
+import soundfile as sf
 
-# Initialize openSMILE with the ComParE 2016 feature set (great for emotion recognition)
-smile = opensmile.Smile(
-    feature_set=opensmile.FeatureSet.ComParE_2016,
-    feature_level=opensmile.FeatureLevel.Functionals
-)
+# Load Whisper model
+model = whisper.load_model("base")
 
-# Define possible emotion categories (you can tweak this)
-EMOTIONS = ["neutral", "happy", "sad", "angry", "fearful", "disgusted", "surprised"]
-
-def analyze_audio_chunk(audio_file):
-    """
-    Extracts acoustic features from an audio file and predicts the dominant emotion.
-    
-    Args:
-        audio_file (str): Path to the audio file.
-    
-    Returns:
-        str: Predicted emotion.
-    """
-    # Extract features using openSMILE
-    features = smile.process_file(audio_file)
-
-    # Convert to a NumPy array
-    feature_values = features.to_numpy()
-
-    # Normalize feature values (mean scaling)
-    feature_mean = np.mean(feature_values, axis=0)
-
-    # Dummy emotion classification logic (Replace with a real classifier)
-    emotion_index = int(np.argmax(feature_mean) % len(EMOTIONS))  # Simulating emotion selection
-    return EMOTIONS[emotion_index]
+def process_chunk(audio_bytes):
+    """Processes audio chunk and converts to text."""
+    try:
+        # Convert bytes to NumPy array
+        audio_np, sample_rate = sf.read(io.BytesIO(audio_bytes), dtype="float32")
+        
+        # Ensure correct shape and format
+        if len(audio_np.shape) > 1:  
+            audio_np = np.mean(audio_np, axis=1)  # Convert to mono
+        
+        # Transcribe using Whisper
+        result = model.transcribe(audio_np, fp16=False)  # Disable FP16 for compatibility
+        return result["text"]
+    except Exception as e:
+        print(f"❌ Error in speech_to_text: {e}")
+        return "Error processing audio"
