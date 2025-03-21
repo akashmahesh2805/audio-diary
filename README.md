@@ -18,3 +18,4 @@ An AI based voice dary that detects emotions in real time.
 
 
  Frontend: https://audio-diary-p1e4.vercel.app/
+ Backend: https://fastapi-production-6871.up.railway.app/

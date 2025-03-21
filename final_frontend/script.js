@@ -12,6 +12,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let audioChunks = [];
     let websocket;
     let recognition;
+    let lastTranscript = ""; // Store transcript to send with audio
 
     // Display default bot message
     displayMessage("Hey, tell me about your day!", "bot");
@@ -37,18 +38,27 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Connect WebSocket
     function connectWebSocket() {
-        websocket = new WebSocket("https://fastapi-production-6871.up.railway.app/");
+        websocket = new WebSocket("wss://fastapi-production-6871.up.railway.app/ws"); // Corrected WebSocket URL
 
         websocket.onopen = () => console.log("WebSocket connected");
+        
         websocket.onmessage = (event) => handleWebSocketMessage(event);
-        websocket.onclose = () => console.log("WebSocket closed, reconnecting...");
+        
+        websocket.onclose = () => {
+            console.log("WebSocket closed, reconnecting...");
+            setTimeout(connectWebSocket, 3000); // Attempt to reconnect
+        };
+
+        websocket.onerror = (error) => console.error("WebSocket error:", error);
     }
 
     function handleWebSocketMessage(event) {
+        console.log("WebSocket received:", event.data); // Debugging
+
         try {
             const data = JSON.parse(event.data);
             displayMessage(data.response, "bot");
-    
+
             // Play bot's audio response if available
             if (data.audio_response) {
                 playBase64Audio(data.audio_response);
@@ -57,13 +67,12 @@ document.addEventListener("DOMContentLoaded", () => {
             console.error("Error processing WebSocket message:", error);
         }
     }
-    
+
     // Function to decode Base64 and play audio
     function playBase64Audio(base64Audio) {
         const audio = new Audio(`data:audio/wav;base64,${base64Audio}`);
         audio.play();
     }
-    
 
     // Display messages in chat box
     function displayMessage(message, sender) {
@@ -81,22 +90,20 @@ document.addEventListener("DOMContentLoaded", () => {
             console.error("Speech Recognition API not supported.");
             return null;
         }
-    
+
         const recognitionInstance = new SpeechRecognition();
         recognitionInstance.continuous = false;
         recognitionInstance.interimResults = false;
         recognitionInstance.lang = "en-US";
-    
+
         recognitionInstance.onresult = (event) => {
-            const transcript = event.results[0][0].transcript;
-            displayMessage(transcript, "user");
-            sendAudioWithText(transcript);  // Send transcript along with the audio
+            lastTranscript = event.results[0][0].transcript;
+            displayMessage(lastTranscript, "user");
         };
-    
+
         recognitionInstance.onerror = (event) => console.error("Speech recognition error:", event.error);
         return recognitionInstance;
     }
-    
 
     // Start Recording
     startBtn.addEventListener("click", async () => {
@@ -111,17 +118,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
             mediaRecorder.onstop = async () => {
                 const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
-                const arrayBuffer = await audioBlob.arrayBuffer();
                 const base64Audio = await blobToBase64(audioBlob); // Convert to base64
-            
-                websocket.send(JSON.stringify({ 
-                    audio: base64Audio, 
-                    text: lastTranscript || ""  // Send last transcript if available
-                }));
-            
+
+                // Ensure WebSocket is open before sending
+                if (websocket.readyState === WebSocket.OPEN) {
+                    websocket.send(JSON.stringify({ 
+                        audio: base64Audio, 
+                        text: lastTranscript || "" // Send last transcript if available
+                    }));
+                } else {
+                    console.error("WebSocket is not open, cannot send message.");
+                }
+
                 audioChunks = [];
             };
-            
 
             mediaRecorder.start();
             startBtn.disabled = true;
@@ -141,11 +151,11 @@ document.addEventListener("DOMContentLoaded", () => {
     stopBtn.addEventListener("click", () => {
         if (mediaRecorder && mediaRecorder.state === "recording") {
             mediaRecorder.stop();
-            if (recognition) recognition.stop();  // Stop speech recognition
+            if (recognition) recognition.stop(); // Stop speech recognition
             startBtn.disabled = false;
             stopBtn.disabled = true;
         }
-    });    
+    });
 
     // Initialize WebSocket
     connectWebSocket();
@@ -157,6 +167,8 @@ document.addEventListener("DOMContentLoaded", () => {
             alert(`${link.textContent} page will be implemented soon!`);
         });
     });
+
+    // Convert Blob to Base64
     function blobToBase64(blob) {
         return new Promise((resolve) => {
             const reader = new FileReader();
@@ -164,5 +176,4 @@ document.addEventListener("DOMContentLoaded", () => {
             reader.onloadend = () => resolve(reader.result.split(",")[1]); // Extract Base64 part
         });
     }
-    
 });
