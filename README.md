@@ -1,5 +1,5 @@
 # audio-diary
-An AI based voice dary that detects emotions in real time.
+An AI based voice diary that detects emotions in real time.
 # Folder Structure
 📂 AI-Mental-Health-Diary  <br />
  ┣ 📂 backend  <br />
